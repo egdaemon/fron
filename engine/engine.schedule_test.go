@@ -83,9 +83,6 @@ func TestSeed(t *testing.T) {
 		require.NotEqual(t, engine.Seed("foo"), engine.Seed("bar"))
 	})
 
-	t.Run("zero offset should be zero", func(t *testing.T) {
-		require.Equal(t, time.Duration(0), engine.ZeroOffset)
-	})
 }
 
 func TestNext(t *testing.T) {
@@ -268,14 +265,6 @@ func TestAutoSeed(t *testing.T) {
 		require.Equal(t, offset(a), offset(again))
 	})
 
-	t.Run("should treat a full period as a zero offset that AutoSeed leaves alone", func(t *testing.T) {
-		s := testx.MustT(engine.New(time.Hour, time.Hour, engine.Options().AutoSeed("row-1")...))(t)
-		require.Equal(t, time.Duration(0), offset(s))
-
-		s = testx.MustT(engine.New(time.Hour, time.Hour, engine.Options().IgnoreSeed().AutoSeed("row-1")...))(t)
-		require.Equal(t, engine.Seed("row-1")%time.Hour, offset(s))
-	})
-
 	t.Run("should keep the offset within one period", func(t *testing.T) {
 		for _, id := range []string{"a", "b", "c", "row-1", "row-2"} {
 			s := testx.MustT(engine.New(15*time.Minute, 0, engine.Options().AutoSeed(id)...))(t)
@@ -295,13 +284,6 @@ func TestAutoSeed(t *testing.T) {
 		require.Greater(t, len(seen), 1)
 	})
 
-	t.Run("should keep a zero offset for the reserved zero offset seed", func(t *testing.T) {
-		s := testx.MustT(engine.New(time.Hour, 0, engine.Options().AutoSeed(engine.ZeroOffsetSeed)...))(t)
-		require.Equal(t, time.Duration(0), offset(s))
-
-		s = testx.MustT(engine.New(time.Hour, 0, engine.Options().IgnoreSeed().AutoSeed(engine.ZeroOffsetSeed)...))(t)
-		require.Equal(t, time.Duration(0), offset(s))
-	})
 }
 
 func TestIgnoreSeed(t *testing.T) {
@@ -382,5 +364,145 @@ func TestWindowSnap(t *testing.T) {
 		// 2026-10-17 is a saturday, so the first weekday window start is monday.
 		s := testx.MustT(engine.New(24*time.Hour, 0, engine.Options().Weekdays().During(9*time.Hour, 17*time.Hour)...))(t)
 		require.Equal(t, day(19, 9, 0), testx.MustT(s.Next(day(16, 17, 0)))(t))
+	})
+}
+
+func TestAt(t *testing.T) {
+	utc := func(d, h, m, s int) time.Time { return time.Date(2026, 10, d, h, m, s, 0, time.UTC) }
+	next := func(t *testing.T, s engine.Schedule, from time.Time) time.Time { return testx.MustT(s.Next(from))(t) }
+	hourly := func(t *testing.T, pin time.Duration, opts ...engine.Option) engine.Schedule {
+		return testx.MustT(engine.New(time.Hour, 0, append(engine.Options().At(pin), opts...)...))(t)
+	}
+
+	t.Run("should tick at the same time past every hour", func(t *testing.T) {
+		s := hourly(t, 7*time.Minute+30*time.Second)
+		first := next(t, s, utc(15, 8, 20, 0))
+		require.Equal(t, utc(15, 9, 7, 30), first)
+		require.Equal(t, utc(15, 10, 7, 30), next(t, s, first))
+	})
+
+	t.Run("should repeat within the local day for a shorter frequency", func(t *testing.T) {
+		s := testx.MustT(engine.New(15*time.Minute, 0, engine.Options().At(2*time.Minute+30*time.Second)...))(t)
+		require.Equal(t, utc(15, 8, 32, 30), next(t, s, utc(15, 8, 20, 0)))
+		require.Equal(t, utc(15, 8, 47, 30), next(t, s, utc(15, 8, 32, 30)))
+		require.Equal(t, utc(15, 9, 2, 30), next(t, s, utc(15, 8, 47, 30)))
+		require.Equal(t, utc(16, 0, 2, 30), next(t, s, utc(15, 23, 47, 30)))
+	})
+
+	t.Run("should pin a daily time", func(t *testing.T) {
+		s := testx.MustT(engine.New(24*time.Hour, 0, engine.Options().At(7*time.Hour+30*time.Minute)...))(t)
+		require.Equal(t, utc(15, 7, 30, 0), next(t, s, utc(15, 0, 0, 0)))
+		require.Equal(t, utc(16, 7, 30, 0), next(t, s, utc(15, 7, 30, 0)))
+		require.Equal(t, utc(16, 7, 30, 0), next(t, s, utc(15, 8, 0, 0)))
+	})
+
+	t.Run("should keep milliseconds", func(t *testing.T) {
+		s := testx.MustT(engine.New(24*time.Hour, 0, engine.Options().At(9*time.Hour+7*time.Minute+30*time.Second+250*time.Millisecond)...))(t)
+		require.Equal(t, time.Date(2026, 10, 15, 9, 7, 30, 250_000_000, time.UTC), next(t, s, utc(15, 0, 0, 0)))
+	})
+
+	t.Run("should keep the exact period boundary for a pin of zero", func(t *testing.T) {
+		s := testx.MustT(engine.New(time.Hour, 0, engine.Options().At(0).AutoSeed("row-1")...))(t)
+		require.Equal(t, utc(15, 9, 0, 0), next(t, s, utc(15, 8, 20, 0)))
+		require.Equal(t, int64(0), s.(interface{ Spec() engine.Spec }).Spec().Offset.Nanoseconds())
+	})
+
+	t.Run("should restart at local midnight when the frequency does not divide a day", func(t *testing.T) {
+		s := testx.MustT(engine.New(7*time.Hour, 0, engine.Options().At(30*time.Minute)...))(t)
+		require.Equal(t, utc(15, 14, 30, 0), next(t, s, utc(15, 8, 20, 0)))
+		require.Equal(t, utc(15, 21, 30, 0), next(t, s, utc(15, 14, 30, 0)))
+		require.Equal(t, utc(16, 0, 30, 0), next(t, s, utc(15, 21, 30, 0)))
+	})
+
+	t.Run("should pin every nth day of a multi day frequency", func(t *testing.T) {
+		s := testx.MustT(engine.New(48*time.Hour, 0, engine.Options().At(7*time.Hour+30*time.Minute)...))(t)
+		first := next(t, s, utc(15, 0, 0, 0))
+		second := next(t, s, first)
+		third := next(t, s, second)
+		require.Equal(t, 7, first.Hour())
+		require.Equal(t, 48*time.Hour, second.Sub(first))
+		require.Equal(t, 48*time.Hour, third.Sub(second))
+	})
+
+	t.Run("should be a wall clock time in the schedule's timezone", func(t *testing.T) {
+		ny := testx.MustT(time.LoadLocation("America/New_York"))(t)
+		s := testx.MustT(engine.New(24*time.Hour, 0, engine.Options().At(7*time.Hour+30*time.Minute).InTz(ny)...))(t)
+
+		// dst ends 2026-11-01: 07:30 is 11:30 utc before and 12:30 utc after.
+		first := next(t, s, time.Date(2026, 10, 30, 0, 0, 0, 0, time.UTC))
+		require.Equal(t, time.Date(2026, 10, 30, 11, 30, 0, 0, time.UTC), first)
+		require.Equal(t, time.Date(2026, 10, 31, 11, 30, 0, 0, time.UTC), next(t, s, first))
+		require.Equal(t, time.Date(2026, 11, 1, 12, 30, 0, 0, time.UTC), next(t, s, time.Date(2026, 10, 31, 11, 30, 0, 0, time.UTC)))
+		require.Equal(t, time.Date(2026, 11, 2, 12, 30, 0, 0, time.UTC), next(t, s, time.Date(2026, 11, 1, 12, 30, 0, 0, time.UTC)))
+	})
+
+	t.Run("should anchor hourly pins to local time in a half hour zone", func(t *testing.T) {
+		kolkata := testx.MustT(time.LoadLocation("Asia/Kolkata"))(t)
+		s := hourly(t, 7*time.Minute+30*time.Second, engine.Options().InTz(kolkata)...)
+		// 08:20 utc is 13:50 ist, so the next 07:30 past the hour is 14:07:30 ist.
+		require.Equal(t, utc(15, 8, 37, 30), next(t, s, utc(15, 8, 20, 0)))
+	})
+
+	t.Run("should move a wall time skipped by daylight saving forward", func(t *testing.T) {
+		ny := testx.MustT(time.LoadLocation("America/New_York"))(t)
+		s := testx.MustT(engine.New(24*time.Hour, 0, engine.Options().At(2*time.Hour+30*time.Minute).InTz(ny)...))(t)
+		// 02:30 does not exist on 2026-03-08 in new york, 03:30 EDT is the next minute that does.
+		got := next(t, s, time.Date(2026, 3, 8, 0, 0, 0, 0, time.UTC))
+		require.Equal(t, time.Date(2026, 3, 8, 7, 30, 0, 0, time.UTC), got)
+		require.Equal(t, time.Date(2026, 3, 9, 6, 30, 0, 0, time.UTC), next(t, s, got))
+	})
+
+	t.Run("should override a seed and an offset", func(t *testing.T) {
+		s := testx.MustT(engine.New(time.Hour, 17*time.Minute, engine.Options().At(2*time.Minute)...))(t)
+		require.Equal(t, utc(15, 9, 2, 0), next(t, s, utc(15, 8, 20, 0)))
+	})
+
+	t.Run("should never be moved by a fallback seed", func(t *testing.T) {
+		s := hourly(t, 7*time.Minute, engine.Options().IgnoreSeed().AutoSeed("row-1")...)
+		require.Equal(t, utc(15, 9, 7, 0), next(t, s, utc(15, 8, 20, 0)))
+	})
+
+	t.Run("should survive IgnoreSeed", func(t *testing.T) {
+		s := testx.MustT(engine.New(time.Hour, 17*time.Minute, engine.Options().At(2*time.Minute).IgnoreSeed()...))(t)
+		require.Equal(t, utc(15, 9, 2, 0), next(t, s, utc(15, 8, 20, 0)))
+	})
+
+	t.Run("should be discarded by IgnorePin", func(t *testing.T) {
+		s := testx.MustT(engine.New(time.Hour, 17*time.Minute, engine.Options().At(2*time.Minute).IgnorePin()...))(t)
+		// without the pin the offset applies on the epoch grid.
+		require.Equal(t, utc(15, 8, 17, 0).Add(time.Hour), next(t, s, utc(15, 8, 20, 0)))
+		require.Equal(t, time.Duration(-1), s.(interface{ Spec() engine.Spec }).Spec().Pin)
+	})
+
+	t.Run("should combine with a window", func(t *testing.T) {
+		s := hourly(t, 7*time.Minute+30*time.Second, engine.Options().During(9*time.Hour, 17*time.Hour)...)
+		require.Equal(t, utc(15, 9, 7, 30), next(t, s, utc(15, 8, 20, 0)))
+		require.Equal(t, utc(15, 16, 7, 30), next(t, s, utc(15, 15, 7, 30)))
+		require.Equal(t, utc(16, 9, 7, 30), next(t, s, utc(15, 16, 7, 30)))
+	})
+
+	t.Run("should line a zero pin up with a window like cron", func(t *testing.T) {
+		s := testx.MustT(engine.New(15*time.Minute, 0, engine.Options().At(0).During(9*time.Hour, 17*time.Hour)...))(t)
+		require.Equal(t, utc(15, 9, 0, 0), next(t, s, utc(15, 8, 20, 0)))
+		require.Equal(t, utc(15, 9, 15, 0), next(t, s, utc(15, 9, 0, 0)))
+		require.Equal(t, utc(16, 9, 0, 0), next(t, s, utc(15, 16, 45, 0)))
+	})
+
+	t.Run("should combine with day conditions", func(t *testing.T) {
+		s := testx.MustT(engine.New(24*time.Hour, 0, engine.Options().At(7*time.Hour+30*time.Minute).Weekdays()...))(t)
+		// 2026-10-16 is a friday.
+		require.Equal(t, utc(19, 7, 30, 0), next(t, s, utc(16, 7, 30, 0)))
+	})
+
+	t.Run("should reject pins outside the frequency", func(t *testing.T) {
+		for name, c := range map[string][2]time.Duration{
+			"negative":       {time.Hour, -time.Second},
+			"a whole day":    {48 * time.Hour, 24 * time.Hour},
+			"as long as hz":  {time.Hour, time.Hour},
+			"longer than hz": {15 * time.Minute, 20 * time.Minute},
+		} {
+			_, err := engine.New(c[0], 0, engine.Options().At(c[1])...)
+			require.Error(t, err, name)
+		}
 	})
 }

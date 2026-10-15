@@ -37,6 +37,9 @@ type parser struct {
 
 	state state
 	seen  [3]bool // on, during, in
+	// clauses counts every clause read after @, including a pin.
+	clauses int
+	pinAt   int
 }
 
 // freq incrementally parses a compact duration such as 5d1h5m3s.
@@ -115,6 +118,7 @@ func perr(offset int, msg string) error {
 // Parse reads input exactly once, left to right, building the tree as it goes.
 func Parse(input string) (T, error) {
 	p := &parser{input: input}
+	p.t.Pin = -1
 
 	var (
 		i   int
@@ -181,18 +185,25 @@ func (p *parser) token(start, end int) error {
 				return perr(start, "duplicate on clause")
 			}
 			p.seen[0], p.state = true, stateDay
+			p.clauses++
 		case "during":
 			if p.seen[1] {
 				return perr(start, "duplicate during clause")
 			}
 			p.seen[1], p.state = true, stateDuring
+			p.clauses++
 		case "in":
 			if p.seen[2] {
 				return perr(start, "duplicate in clause")
 			}
 			p.seen[2], p.state = true, stateIn
+			p.clauses++
 		default:
-			return perr(start, fmt.Sprintf("unexpected %q, expected on, during, or in", text))
+			if text[0] >= '0' && text[0] <= '9' {
+				return p.pin(text, start)
+			}
+
+			return perr(start, fmt.Sprintf("unexpected %q, expected a time, on, during, or in", text))
 		}
 	case stateDay:
 		return p.day(text, start)
@@ -266,15 +277,15 @@ func (p *parser) finish(n int) (T, error) {
 			return T{}, err
 		}
 	case stateKeyword:
-		if !p.seen[0] && !p.seen[1] && !p.seen[2] {
+		if p.clauses == 0 {
 			return T{}, perr(n, "missing condition after @")
 		}
 	default:
 		return T{}, perr(n, "incomplete condition")
 	}
 
-	if p.t.HasSeed && p.t.Seed == ZeroOffsetSeed {
-		p.t.ZeroOffset = true
+	if p.t.Pin >= 0 && p.t.HasWindow && !ticksInWindow(p.t) {
+		return T{}, perr(p.pinAt, fmt.Sprintf("time %s never falls inside during %s-%s", clockString(p.t.Pin), clockString(p.t.Start), clockString(p.t.End)))
 	}
 
 	return p.t, nil
@@ -355,16 +366,17 @@ func (p *parser) dayNumbers(text string, at int) error {
 }
 
 func (p *parser) during(text string, at int) error {
-	if len(text) != 11 || text[2] != ':' || text[5] != '-' || text[8] != ':' {
-		return perr(at, fmt.Sprintf("invalid time range %q, expected HH:MM-HH:MM", text))
+	from, to, ok := strings.Cut(text, "-")
+	if !ok {
+		return perr(at, fmt.Sprintf("invalid time range %q, expected HH:MM[:SS[.mmm]]-HH:MM[:SS[.mmm]]", text))
 	}
 
-	start, err := clock(text[0:5], at)
+	start, err := clock(from, at)
 	if err != nil {
 		return err
 	}
 
-	end, err := clock(text[6:11], at+6)
+	end, err := clock(to, at+len(from)+1)
 	if err != nil {
 		return err
 	}
@@ -382,18 +394,130 @@ func (p *parser) during(text string, at int) error {
 	return nil
 }
 
+// pin reads the time that pins the frequency's slot. it must be the first
+// clause after @ and shorter than the frequency.
+func (p *parser) pin(text string, at int) error {
+	if p.clauses > 0 {
+		return perr(at, "a time must be the first clause after @")
+	}
+
+	d, err := clock(text, at)
+	if err != nil {
+		return err
+	}
+
+	if d >= 24*time.Hour {
+		return perr(at, "time must be before 24:00")
+	}
+
+	if d >= p.t.Hz {
+		return perr(at, fmt.Sprintf("time %s must be shorter than the frequency", text))
+	}
+
+	p.t.Pin, p.pinAt = d, at
+	p.clauses++
+	return nil
+}
+
+// ticksInWindow reports whether any tick of a pinned schedule can land inside
+// its during window. the ticks of a local day are pin, pin+hz, ... below 24h,
+// or just the pin for a frequency of a day or more.
+func ticksInWindow(t T) bool {
+	const day = 24 * time.Hour
+
+	// any tick in [lo, hi) of the day.
+	has := func(lo, hi time.Duration) bool {
+		if lo >= hi {
+			return false
+		}
+
+		var k time.Duration
+		if lo > t.Pin {
+			k = (lo - t.Pin + t.Hz - 1) / t.Hz
+		}
+
+		if t.Hz >= day && k > 0 {
+			return false
+		}
+
+		off := t.Pin + k*t.Hz
+		return off < hi && off < day
+	}
+
+	if t.Start < t.End {
+		return has(t.Start, t.End)
+	}
+
+	return has(t.Start, day) || has(0, t.End)
+}
+
+// clockString renders a duration as HH:MM[:SS[.mmm]].
+func clockString(d time.Duration) string {
+	h, m, s, ms := int(d/time.Hour), int(d%time.Hour/time.Minute), int(d%time.Minute/time.Second), int(d%time.Second/time.Millisecond)
+	switch {
+	case ms != 0:
+		return fmt.Sprintf("%02d:%02d:%02d.%03d", h, m, s, ms)
+	case s != 0:
+		return fmt.Sprintf("%02d:%02d:%02d", h, m, s)
+	default:
+		return fmt.Sprintf("%02d:%02d", h, m)
+	}
+}
+
+// clock parses HH:MM[:SS[.mmm]], at most millisecond precision.
 func clock(s string, at int) (time.Duration, error) {
-	for _, i := range []int{0, 1, 3, 4} {
-		if s[i] < '0' || s[i] > '9' {
-			return 0, perr(at+i, fmt.Sprintf("invalid time %q", s))
+	bad := func() error {
+		return perr(at, fmt.Sprintf("invalid time %q, expected HH:MM[:SS[.mmm]]", s))
+	}
+
+	two := func(i int) (int, bool) {
+		if i+2 > len(s) || s[i] < '0' || s[i] > '9' || s[i+1] < '0' || s[i+1] > '9' {
+			return 0, false
+		}
+		return int(s[i]-'0')*10 + int(s[i+1]-'0'), true
+	}
+
+	if len(s) < 5 || s[2] != ':' {
+		return 0, bad()
+	}
+
+	h, hok := two(0)
+	m, mok := two(3)
+	if !hok || !mok {
+		return 0, bad()
+	}
+
+	var sec, ms int
+	if rest := s[5:]; rest != "" {
+		if rest[0] != ':' {
+			return 0, bad()
+		}
+
+		var ok bool
+		if sec, ok = two(6); !ok {
+			return 0, bad()
+		}
+
+		if rest = rest[3:]; rest != "" {
+			if rest[0] != '.' || len(rest) < 2 || len(rest) > 4 {
+				return 0, bad()
+			}
+
+			scale := 100
+			for _, c := range []byte(rest[1:]) {
+				if c < '0' || c > '9' {
+					return 0, bad()
+				}
+				ms += int(c-'0') * scale
+				scale /= 10
+			}
 		}
 	}
 
-	h := int(s[0]-'0')*10 + int(s[1]-'0')
-	m := int(s[3]-'0')*10 + int(s[4]-'0')
-	if m > 59 || h > 24 || (h == 24 && m != 0) {
+	if m > 59 || sec > 59 || h > 24 || (h == 24 && (m != 0 || sec != 0 || ms != 0)) {
 		return 0, perr(at, fmt.Sprintf("time out of range %q", s))
 	}
 
-	return time.Duration(h)*time.Hour + time.Duration(m)*time.Minute, nil
+	return time.Duration(h)*time.Hour + time.Duration(m)*time.Minute +
+		time.Duration(sec)*time.Second + time.Duration(ms)*time.Millisecond, nil
 }

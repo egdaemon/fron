@@ -2,14 +2,7 @@
 // a engine.Schedule, and renders it as a cron expression.
 package ast
 
-import (
-	"time"
-
-	"github.com/egdaemon/fron/engine"
-)
-
-// ZeroOffsetSeed is the reserved seed selecting cron-equivalent mode.
-const ZeroOffsetSeed = engine.ZeroOffsetSeed
+import "time"
 
 type dayclause uint8
 
@@ -25,9 +18,8 @@ const (
 
 // T is a node in the parsed schedule tree.
 type T struct {
-	Seed       string
-	HasSeed    bool
-	ZeroOffset bool
+	Seed    string
+	HasSeed bool
 
 	Hz time.Duration
 
@@ -38,6 +30,10 @@ type T struct {
 
 	HasWindow  bool
 	Start, End time.Duration
+
+	// Pin pins ticks to a wall clock time within each period of the frequency,
+	// e.g. 1h @ 00:07:30 ticks at HH:07:30. It is -1 when there is no pin.
+	Pin time.Duration
 
 	Tz string
 }

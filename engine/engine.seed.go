@@ -18,21 +18,11 @@ func Seed[T seed](s T) time.Duration {
 	return backoffx.DynamicHashDuration(time.Duration(math.MaxInt64), string(s))
 }
 
-// ZeroOffsetSeed is the reserved seed selecting the cron-equivalent zero offset.
-const ZeroOffsetSeed = "fron.zero.offset"
-
 // autoOffset resolves an auto seed id to an offset within one period.
 func autoOffset(id string, hz time.Duration) time.Duration {
-	switch id {
-	case ZeroOffsetSeed:
-		return 0
-	case "":
+	if id == "" {
 		return time.Duration(rand.Uint64() % uint64(hz))
-	default:
-		return Seed(id) % hz
 	}
-}
 
-// ZeroOffset is the cron-equivalent offset: ticks land on clock boundaries
-// with no jitter.
-const ZeroOffset time.Duration = 0
+	return Seed(id) % hz
+}

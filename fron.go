@@ -26,10 +26,6 @@ type (
 const (
 	// DefaultHorizon is how far past the reference time Next searches by default.
 	DefaultHorizon = engine.DefaultHorizon
-	// ZeroOffset is the cron-equivalent offset: ticks land on clock boundaries.
-	ZeroOffset = engine.ZeroOffset
-	// ZeroOffsetSeed is the reserved DSL seed selecting ZeroOffset.
-	ZeroOffsetSeed = engine.ZeroOffsetSeed
 )
 
 // ErrNoTick is returned by Next when no tick exists within the horizon.

@@ -32,21 +32,21 @@ func Compile(t T, seed string, options ...engine.Option) (engine.Schedule, error
 		opts = opts.During(t.Start, t.End)
 	}
 
+	if t.Pin >= 0 {
+		opts = opts.At(t.Pin)
+	}
+
 	// a blank timezone is UTC.
 	opts = opts.InTzName(t.Tz)
 	opts = append(opts, options...)
 
 	var offset time.Duration
-	switch {
-	case t.ZeroOffset:
-		// a full period is zero modulo hz, but unlike zero the fallback
-		// below leaves it alone, unless a caller option ignores the seed.
-		offset = t.Hz
-	case t.HasSeed:
+	if t.HasSeed {
 		offset = engine.Seed(t.Seed)
 	}
 
 	// the fallback seed fills the offset when the schedule did not carry one,
-	// or an option cleared it. it is applied last so caller options win.
+	// or an option cleared it. it is applied last so caller options win. a pin
+	// overrides the offset whatever it is.
 	return engine.New(t.Hz, offset, opts.AutoSeed(seed)...)
 }

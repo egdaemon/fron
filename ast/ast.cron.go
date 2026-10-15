@@ -2,6 +2,7 @@ package ast
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -27,10 +28,10 @@ func CRON(t T, options ...engine.Option) (string, error) {
 		return "", errors.New("ast: schedule does not describe itself")
 	}
 
-	return render(d.Spec(), t.Tz != ""), nil
+	return render(d.Spec(), t.Tz != "", t.Pin), nil
 }
 
-func render(s engine.Spec, tz bool) string {
+func render(s engine.Spec, tz bool, pin time.Duration) string {
 	var (
 		minute = "*"
 		hour   = "*"
@@ -65,6 +66,10 @@ func render(s engine.Spec, tz bool) string {
 			hour = strconv.Itoa(int(s.Start / time.Hour))
 		}
 		dom = step(minutes / (24 * 60))
+	}
+
+	if pin >= 0 {
+		minute, hour = pinFields(s.Hz, pin, s.Window, minute, hour)
 	}
 
 	if len(s.DaysOfMonth) > 0 {
@@ -161,4 +166,41 @@ func field(values []int, min int) string {
 	}
 
 	return strings.Join(parts, ",")
+}
+
+// pinFields renders a time pinned within the frequency. Cron has no seconds,
+// so seconds and milliseconds are dropped. With a window the hours stay the
+// window's and only the minute comes from the pin.
+func pinFields(hz, pin time.Duration, window bool, minute, hour string) (string, string) {
+	minutes := int64(hz / time.Minute)
+
+	switch {
+	case minutes < 1:
+		return minute, hour
+	case minutes < 60:
+		first := int64(pin/time.Minute) % minutes
+		if first == 0 {
+			return minute, hour
+		}
+
+		return fmt.Sprintf("%d-59/%d", first, minutes), hour
+	case minutes < 24*60:
+		n := minutes / 60
+		m := strconv.FormatInt(int64(pin%time.Hour/time.Minute), 10)
+		if window {
+			return m, hour
+		}
+
+		switch h := int64(pin / time.Hour); {
+		case n <= 1:
+			return m, "*"
+		case h > 0:
+			return m, fmt.Sprintf("%d-23/%d", h, n)
+		default:
+			return m, "*/" + strconv.FormatInt(n, 10)
+		}
+	default:
+		// a daily tick sits at the pin, which a window only validates.
+		return strconv.FormatInt(int64(pin%time.Hour/time.Minute), 10), strconv.FormatInt(int64(pin/time.Hour), 10)
+	}
 }

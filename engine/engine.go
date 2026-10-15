@@ -31,6 +31,11 @@ type scheduler struct {
 	hz     time.Duration
 	offset time.Duration
 
+	// pin is the wall clock time of day (within a period) that ticks are pinned
+	// to, -1 means no pin. a pin overrides the offset and anchors the tick grid
+	// at local midnight instead of the unix epoch.
+	pin time.Duration
+
 	// horizon bounds how far past the reference time Next searches.
 	horizon time.Duration
 	// lastdelta shifts the reference time before searching, zero is strictly after
@@ -61,15 +66,18 @@ func New(hz, offset time.Duration, options ...Option) (Schedule, error) {
 		return nil, fmt.Errorf("engine: offset must not be negative: %s", offset)
 	}
 
-	s := &scheduler{hz: hz, offset: offset, loc: time.UTC, horizon: DefaultHorizon}
+	s := &scheduler{hz: hz, offset: offset, pin: -1, loc: time.UTC, horizon: DefaultHorizon}
 	for _, opt := range options {
 		if err := opt(s); err != nil {
 			return nil, err
 		}
 	}
 
-	// reduced after the options so a caller can pass a full period: zero
-	// modulo hz, but not the zero offset AutoSeed fills.
+	// a pin is applied last so neither a seed nor a fallback can move it.
+	if s.pin >= 0 {
+		s.offset = s.pin
+	}
+
 	s.offset %= hz
 	return s, nil
 }
@@ -78,8 +86,10 @@ func New(hz, offset time.Duration, options ...Option) (Schedule, error) {
 type Spec struct {
 	// Hz is the tick frequency.
 	Hz time.Duration
-	// Offset is the tick offset within one period.
+	// Offset is the tick offset within one period, the pin when there is one.
 	Offset time.Duration
+	// Pin is the wall clock time ticks are pinned to, -1 when there is none.
+	Pin time.Duration
 	// Days are the permitted weekdays in configured order, empty when unrestricted.
 	Days []time.Weekday
 	// DaysOfMonth are the permitted days of the month in ascending order, empty when unrestricted.
@@ -101,6 +111,7 @@ func (t *scheduler) Spec() Spec {
 	s := Spec{
 		Hz:        t.hz,
 		Offset:    t.offset,
+		Pin:       t.pin,
 		LastDelta: t.lastdelta,
 		Horizon:   t.horizon,
 		Window:    t.window,

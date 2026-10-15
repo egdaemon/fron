@@ -12,7 +12,7 @@ import (
 
 func TestCompile(t *testing.T) {
 	t.Run("should match the code first option form", func(t *testing.T) {
-		a, err := ast.Parse("fron.zero.offset | 15m @ on weekdays during 09:00-17:00 in UTC")
+		a, err := ast.Parse("15m @ 00:00 on weekdays during 09:00-17:00 in UTC")
 		require.NoError(t, err)
 
 		compiled, err := ast.Compile(a, "")
@@ -20,8 +20,9 @@ func TestCompile(t *testing.T) {
 
 		manual, err := engine.New(
 			15*time.Minute,
-			engine.ZeroOffset,
+			0,
 			engine.Options().
+				At(0).
 				Weekdays().
 				During(9*time.Hour, 17*time.Hour).
 				InTz(time.UTC)...,
@@ -52,7 +53,7 @@ func TestCompile(t *testing.T) {
 	})
 
 	t.Run("should let extra options override the tree", func(t *testing.T) {
-		a, err := ast.Parse("fron.zero.offset | 1h @ on weekdays")
+		a, err := ast.Parse("1h @ 00:00 on weekdays")
 		require.NoError(t, err)
 
 		compiled, err := ast.Compile(a, "", engine.Options().Weekends()...)

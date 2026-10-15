@@ -63,10 +63,61 @@ func (t *scheduler) skip(from, target time.Time) time.Time {
 // unix epoch plus a multiple of hz plus the offset. the distance from the epoch
 // is held as a 128 bit count of nanoseconds so it never overflows.
 func (t *scheduler) align(from time.Time) time.Time {
+	if t.pin >= 0 {
+		return t.alignLocal(from)
+	}
+
 	hz := uint64(t.hz)
 	rem := (epochmod(from, hz) + hz - uint64(t.offset)%hz) % hz
 
 	return from.Add(time.Duration(hz - rem))
+}
+
+// alignLocal returns the first pinned tick strictly after from. pinned grids
+// are anchored at local midnight: on each local day ticks fall at pin,
+// pin+hz, ... while still in the day, and a frequency of whole days ticks at
+// pin on every nth local day (counted from the unix epoch day).
+func (t *scheduler) alignLocal(from time.Time) time.Time {
+	const day = 24 * time.Hour
+
+	local := from.In(t.loc)
+	first := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, t.loc)
+
+	n := int64(1)
+	if t.hz >= day && t.hz%day == 0 {
+		n = int64(t.hz / day)
+	}
+
+	for i := 0; ; i++ {
+		d := first.AddDate(0, 0, i)
+		if n > 1 && civilDay(d)%n != 0 {
+			continue
+		}
+
+		var k int64
+		if i == 0 {
+			// skip the ticks of today that are already past.
+			if elapsed := wall(local); elapsed >= t.pin {
+				k = int64((elapsed-t.pin)/t.hz) + 1
+			}
+		}
+
+		for ; ; k++ {
+			off := t.pin + time.Duration(k)*t.hz
+			if off >= day || (t.hz >= day && k > 0) {
+				break
+			}
+
+			if c := at(d, off); c.After(from) {
+				return c
+			}
+		}
+	}
+}
+
+// civilDay is the number of days from the unix epoch to the civil date of t.
+func civilDay(t time.Time) int64 {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC).Unix() / 86400
 }
 
 // epochmod is the nanoseconds since the unix epoch modulo hz, in [0, hz).
@@ -117,9 +168,17 @@ func wall(t time.Time) time.Duration {
 		time.Duration(t.Nanosecond())
 }
 
-// at is the wall clock time of day d on the same date as t.
+// at is the wall clock time of day d on the same date as t. a time skipped by
+// a daylight saving transition moves forward by the length of the gap.
 func at(t time.Time, d time.Duration) time.Time {
-	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, int(d/time.Second), int(d%time.Second), t.Location())
+	c := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, int(d/time.Second), int(d%time.Second), t.Location())
+	if c.Day() == t.Day() {
+		if got := wall(c); got < d {
+			return c.Add(d - got)
+		}
+	}
+
+	return c
 }
 
 // snap returns the first tick of the window occurrence starting at ws: the

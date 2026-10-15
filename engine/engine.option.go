@@ -165,8 +165,7 @@ func (t Chain) Horizon(d time.Duration) Chain {
 }
 
 // IgnoreSeed discards the offset given to New, so a seed written in a DSL
-// string, the reserved ZeroOffsetSeed, or an auto seed derived from the text
-// no longer matters. The offset becomes zero.
+// string no longer matters. The offset becomes zero; a pin is not affected.
 func (t Chain) IgnoreSeed() Chain {
 	return t.add(func(s *scheduler) error {
 		s.offset = 0
@@ -175,15 +174,40 @@ func (t Chain) IgnoreSeed() Chain {
 }
 
 // AutoSeed fills the offset from id when it is zero, either because none was
-// supplied or IgnoreSeed cleared it. A non-empty id hashes like Seed, an empty
-// id is a random offset, and the reserved ZeroOffsetSeed leaves the offset at
-// zero. Options apply in order, so IgnoreSeed must come before AutoSeed.
+// supplied or IgnoreSeed cleared it. A non-empty id hashes like Seed and an
+// empty id is a random offset. Options apply in order, so IgnoreSeed must come
+// before AutoSeed.
 func (t Chain) AutoSeed(id string) Chain {
 	return t.add(func(s *scheduler) error {
 		if s.offset == 0 {
 			s.offset = autoOffset(id, s.hz)
 		}
 
+		return nil
+	})
+}
+
+// At pins ticks to the wall clock time d, in the schedule's timezone, within
+// each period of the frequency: on every local day ticks fall at d, d+hz,
+// d+2hz, ... while still in that day, so for an hourly schedule 00:07:30 ticks
+// at HH:07:30 and for a daily schedule 07:30 ticks at 07:30. For a frequency of
+// whole days it is d on every nth local day. A pin overrides any seed or
+// offset, and d must be shorter than both the frequency and a day.
+func (t Chain) At(d time.Duration) Chain {
+	return t.add(func(s *scheduler) error {
+		if d < 0 || d >= 24*time.Hour || d >= s.hz {
+			return fmt.Errorf("engine: pin out of range: %s", d)
+		}
+
+		s.pin = d
+		return nil
+	})
+}
+
+// IgnorePin discards a pin, ticks then follow the seed or offset.
+func (t Chain) IgnorePin() Chain {
+	return t.add(func(s *scheduler) error {
+		s.pin = -1
 		return nil
 	})
 }

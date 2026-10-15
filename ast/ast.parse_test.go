@@ -15,7 +15,7 @@ func TestParse(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, 30*time.Minute, a.Hz)
 		require.False(t, a.HasSeed)
-		require.False(t, a.ZeroOffset)
+		require.Equal(t, time.Duration(-1), a.Pin)
 	})
 
 	t.Run("should parse compound frequencies", func(t *testing.T) {
@@ -32,11 +32,68 @@ func TestParse(t *testing.T) {
 		require.Equal(t, 2*time.Hour, a.Hz)
 	})
 
-	t.Run("should flag the reserved zero offset seed", func(t *testing.T) {
-		a, err := ast.Parse("fron.zero.offset | 15m")
+	t.Run("should parse a pin as the first clause", func(t *testing.T) {
+		for in, expected := range map[string]time.Duration{
+			"1h @ 00:07:30":          7*time.Minute + 30*time.Second,
+			"1h @ 00:07":             7 * time.Minute,
+			"1h @ 00:07:30.5":        7*time.Minute + 30*time.Second + 500*time.Millisecond,
+			"1h @ 00:07:30.250":      7*time.Minute + 30*time.Second + 250*time.Millisecond,
+			"1h@00:07:30":            7*time.Minute + 30*time.Second,
+			"1d @ 07:30 on weekdays": 7*time.Hour + 30*time.Minute,
+			"1h @ 00:00":             0,
+		} {
+			a, err := ast.Parse(in)
+			require.NoError(t, err, in)
+			require.Equal(t, expected, a.Pin, in)
+		}
+	})
+
+	t.Run("should keep conditions after a pin", func(t *testing.T) {
+		a, err := ast.Parse("1h @ 00:07:30 during 09:00-17:00 in UTC")
 		require.NoError(t, err)
-		require.True(t, a.ZeroOffset)
-		require.Equal(t, 15*time.Minute, a.Hz)
+		require.True(t, a.HasWindow)
+		require.Equal(t, "UTC", a.Tz)
+		require.Equal(t, 7*time.Minute+30*time.Second, a.Pin)
+	})
+
+	t.Run("should accept seconds and milliseconds in a window", func(t *testing.T) {
+		a, err := ast.Parse("15m @ 00:00 during 09:00:30-17:00:00.250")
+		require.NoError(t, err)
+		require.Equal(t, 9*time.Hour+30*time.Second, a.Start)
+		require.Equal(t, 17*time.Hour+250*time.Millisecond, a.End)
+	})
+
+	t.Run("should report where a pin never falls inside the window", func(t *testing.T) {
+		_, err := ast.Parse("1d @ 07:30 during 09:00-17:00")
+		require.ErrorContains(t, err, "time 07:30 never falls inside during 09:00-17:00")
+	})
+
+	t.Run("should accept pins that land inside the window", func(t *testing.T) {
+		for _, in := range []string{
+			"1h @ 00:07:30 during 09:00-17:00",
+			"15m @ 00:00 during 09:00-17:00",
+			"1d @ 12:00 during 09:00-17:00",
+			"15m @ 00:02:30 during 22:00-02:00",
+			"1d @ 23:00 during 22:00-02:00",
+			"1d @ 01:00 during 22:00-02:00",
+			"6h @ 03:00 during 09:00-10:00",
+		} {
+			_, err := ast.Parse(in)
+			require.NoError(t, err, in)
+		}
+	})
+
+	t.Run("should reject pins that never land inside the window", func(t *testing.T) {
+		for _, in := range []string{
+			"1d @ 07:30 during 09:00-17:00",
+			"6h @ 01:00 during 09:00-10:00",
+			"1d @ 12:00 during 22:00-02:00",
+			"2d @ 08:59:59 during 09:00-17:00",
+			"1d @ 17:00 during 09:00-17:00",
+		} {
+			_, err := ast.Parse(in)
+			require.Error(t, err, in)
+		}
 	})
 
 	t.Run("should parse every condition", func(t *testing.T) {
