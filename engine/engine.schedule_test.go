@@ -162,7 +162,7 @@ func TestInTzName(t *testing.T) {
 	t.Run("should default to utc when no timezone is configured", func(t *testing.T) {
 		loc := time.FixedZone("plus2", 2*60*60)
 		s := testx.MustT(engine.New(time.Hour, 0, engine.Options().During(9*time.Hour, 10*time.Hour)...))(t)
-		require.Nil(t, s.(interface{ Spec() engine.Spec }).Spec().Location)
+		require.Equal(t, time.UTC, s.(interface{ Spec() engine.Spec }).Spec().Location)
 		// 09:00 utc, regardless of the caller's location.
 		require.True(t, time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC).Equal(testx.MustT(s.Next(time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC).In(loc)))(t)))
 	})
@@ -236,5 +236,83 @@ func TestHorizon(t *testing.T) {
 		s := testx.MustT(engine.New(15*time.Minute, 0))(t)
 		require.Equal(t, time.Date(1969, 12, 31, 23, 45, 0, 0, time.UTC), testx.MustT(s.Next(time.Date(1969, 12, 31, 23, 31, 7, 5, time.UTC)))(t))
 		require.Equal(t, time.Date(1900, 1, 1, 0, 15, 0, 0, time.UTC), testx.MustT(s.Next(time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC)))(t))
+	})
+}
+
+func TestAutoSeed(t *testing.T) {
+	offset := func(s engine.Schedule) time.Duration {
+		return s.(interface{ Spec() engine.Spec }).Spec().Offset
+	}
+
+	t.Run("should fill a zero offset from the id", func(t *testing.T) {
+		s := testx.MustT(engine.New(time.Hour, 0, engine.Options().AutoSeed("row-1")...))(t)
+		require.Equal(t, engine.Seed("row-1")%time.Hour, offset(s))
+		require.NotZero(t, offset(s))
+	})
+
+	t.Run("should leave a non zero offset alone", func(t *testing.T) {
+		s := testx.MustT(engine.New(time.Hour, 7*time.Minute, engine.Options().AutoSeed("row-1")...))(t)
+		require.Equal(t, 7*time.Minute, offset(s))
+	})
+
+	t.Run("should let the first auto seed that fills the offset win", func(t *testing.T) {
+		s := testx.MustT(engine.New(time.Hour, 0, engine.Options().AutoSeed("row-1").AutoSeed("row-2")...))(t)
+		require.Equal(t, engine.Seed("row-1")%time.Hour, offset(s))
+	})
+
+	t.Run("should differ across ids and be deterministic", func(t *testing.T) {
+		a := testx.MustT(engine.New(time.Hour, 0, engine.Options().AutoSeed("a")...))(t)
+		b := testx.MustT(engine.New(time.Hour, 0, engine.Options().AutoSeed("b")...))(t)
+		again := testx.MustT(engine.New(time.Hour, 0, engine.Options().AutoSeed("a")...))(t)
+		require.NotEqual(t, offset(a), offset(b))
+		require.Equal(t, offset(a), offset(again))
+	})
+
+	t.Run("should keep the offset within one period", func(t *testing.T) {
+		for _, id := range []string{"a", "b", "c", "row-1", "row-2"} {
+			s := testx.MustT(engine.New(15*time.Minute, 0, engine.Options().AutoSeed(id)...))(t)
+			require.Less(t, offset(s), 15*time.Minute, id)
+			require.GreaterOrEqual(t, offset(s), time.Duration(0), id)
+		}
+	})
+
+	t.Run("should use a random offset for an empty id", func(t *testing.T) {
+		seen := make(map[time.Duration]struct{})
+		for range 50 {
+			s := testx.MustT(engine.New(24*time.Hour, 0, engine.Options().AutoSeed("")...))(t)
+			require.Less(t, offset(s), 24*time.Hour)
+			require.GreaterOrEqual(t, offset(s), time.Duration(0))
+			seen[offset(s)] = struct{}{}
+		}
+		require.Greater(t, len(seen), 1)
+	})
+
+	t.Run("should keep a zero offset for the reserved zero offset seed", func(t *testing.T) {
+		s := testx.MustT(engine.New(time.Hour, 0, engine.Options().AutoSeed(engine.ZeroOffsetSeed)...))(t)
+		require.Equal(t, time.Duration(0), offset(s))
+
+		s = testx.MustT(engine.New(time.Hour, 0, engine.Options().IgnoreSeed().AutoSeed(engine.ZeroOffsetSeed)...))(t)
+		require.Equal(t, time.Duration(0), offset(s))
+	})
+}
+
+func TestIgnoreSeed(t *testing.T) {
+	offset := func(s engine.Schedule) time.Duration {
+		return s.(interface{ Spec() engine.Spec }).Spec().Offset
+	}
+
+	t.Run("should discard the given offset", func(t *testing.T) {
+		s := testx.MustT(engine.New(time.Hour, 7*time.Minute, engine.Options().IgnoreSeed()...))(t)
+		require.Equal(t, time.Duration(0), offset(s))
+	})
+
+	t.Run("should let the auto seed supply the offset afterwards", func(t *testing.T) {
+		s := testx.MustT(engine.New(time.Hour, 7*time.Minute, engine.Options().IgnoreSeed().AutoSeed("row-1")...))(t)
+		require.Equal(t, engine.Seed("row-1")%time.Hour, offset(s))
+	})
+
+	t.Run("should apply in order so the ignore must come first", func(t *testing.T) {
+		s := testx.MustT(engine.New(time.Hour, 7*time.Minute, engine.Options().AutoSeed("row-1").IgnoreSeed()...))(t)
+		require.Equal(t, time.Duration(0), offset(s))
 	})
 }

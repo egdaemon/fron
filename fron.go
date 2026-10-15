@@ -29,7 +29,7 @@ const (
 	// ZeroOffset is the cron-equivalent offset: ticks land on clock boundaries.
 	ZeroOffset = engine.ZeroOffset
 	// ZeroOffsetSeed is the reserved DSL seed selecting ZeroOffset.
-	ZeroOffsetSeed = ast.ZeroOffsetSeed
+	ZeroOffsetSeed = engine.ZeroOffsetSeed
 )
 
 // ErrNoTick is returned by Next when no tick exists within the horizon.

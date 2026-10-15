@@ -37,9 +37,6 @@ type scheduler struct {
 	// and Inclusive sets it to one nanosecond back.
 	lastdelta time.Duration
 
-	// tz is true when a timezone was configured explicitly.
-	tz bool
-
 	// weekdays is a bitmask indexed by time.Weekday, zero means unrestricted.
 	weekdays uint8
 	// dayorder is the order the weekdays were configured in, wrapped ranges
@@ -92,7 +89,7 @@ type Spec struct {
 	Horizon time.Duration
 	// LastDelta shifts the reference time before Next searches, zero is strictly after.
 	LastDelta time.Duration
-	// Location is the explicitly configured timezone, nil when unset (conditions then evaluate in UTC).
+	// Location is the timezone the conditions are evaluated in, UTC unless configured.
 	Location *time.Location
 }
 
@@ -106,10 +103,7 @@ func (t *scheduler) Spec() Spec {
 		Window:    t.window,
 		Start:     t.start,
 		End:       t.end,
-	}
-
-	if t.tz {
-		s.Location = t.loc
+		Location:  t.loc,
 	}
 
 	s.Days = append(s.Days, t.dayorder...)

@@ -79,3 +79,38 @@ func TestNextTick(t *testing.T) {
 		require.ErrorIs(t, err, fron.ErrNoTick)
 	})
 }
+
+func TestNextTickSeeds(t *testing.T) {
+	from := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
+
+	t.Run("should give every id its own stable slot", func(t *testing.T) {
+		a := testx.MustT(fron.NextTick(from, "1h", fron.Options().IgnoreSeed().AutoSeed("row-a")...))(t)
+		b := testx.MustT(fron.NextTick(from, "1h", fron.Options().IgnoreSeed().AutoSeed("row-b")...))(t)
+		again := testx.MustT(fron.NextTick(from, "1h", fron.Options().IgnoreSeed().AutoSeed("row-a")...))(t)
+
+		require.NotEqual(t, a, b)
+		require.Equal(t, a, again)
+		require.True(t, a.After(from))
+	})
+
+	t.Run("should ignore a seed typed in the string", func(t *testing.T) {
+		opts := fron.Options().IgnoreSeed().AutoSeed("row-a")
+		plain := testx.MustT(fron.NextTick(from, "1h", opts...))(t)
+		typed := testx.MustT(fron.NextTick(from, "someone-else | 1h", opts...))(t)
+		zero := testx.MustT(fron.NextTick(from, "fron.zero.offset | 1h", opts...))(t)
+
+		require.Equal(t, plain, typed)
+		require.Equal(t, plain, zero)
+	})
+
+	t.Run("should honour a typed seed without the options", func(t *testing.T) {
+		zero := testx.MustT(fron.NextTick(from, "fron.zero.offset | 1h"))(t)
+		require.Equal(t, time.Date(2026, 10, 15, 1, 0, 0, 0, time.UTC), zero)
+	})
+
+	t.Run("should keep conditions when seeding", func(t *testing.T) {
+		// 2026-10-17 is a saturday.
+		got := testx.MustT(fron.NextTick(time.Date(2026, 10, 17, 0, 0, 0, 0, time.UTC), "1h @ on weekdays", fron.Options().IgnoreSeed().AutoSeed("row-a")...))(t)
+		require.Equal(t, time.Monday, got.Weekday())
+	})
+}

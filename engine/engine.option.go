@@ -110,7 +110,7 @@ func (t Chain) InTz(loc *time.Location) Chain {
 			return errors.New("engine: nil timezone")
 		}
 
-		s.loc, s.tz = loc, true
+		s.loc = loc
 		return nil
 	})
 }
@@ -160,6 +160,30 @@ func (t Chain) Horizon(d time.Duration) Chain {
 		}
 
 		s.horizon = d
+		return nil
+	})
+}
+
+// IgnoreSeed discards the offset given to New, so a seed written in a DSL
+// string, the reserved ZeroOffsetSeed, or an auto seed derived from the text
+// no longer matters. The offset becomes zero.
+func (t Chain) IgnoreSeed() Chain {
+	return t.add(func(s *scheduler) error {
+		s.offset = 0
+		return nil
+	})
+}
+
+// AutoSeed fills the offset from id when it is zero, either because none was
+// supplied or IgnoreSeed cleared it. A non-empty id hashes like Seed, an empty
+// id is a random offset, and the reserved ZeroOffsetSeed leaves the offset at
+// zero. Options apply in order, so IgnoreSeed must come before AutoSeed.
+func (t Chain) AutoSeed(id string) Chain {
+	return t.add(func(s *scheduler) error {
+		if s.offset == 0 {
+			s.offset = autoOffset(id, s.hz)
+		}
+
 		return nil
 	})
 }

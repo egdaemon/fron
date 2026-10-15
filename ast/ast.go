@@ -2,10 +2,14 @@
 // a engine.Schedule, and renders it as a cron expression.
 package ast
 
-import "time"
+import (
+	"time"
+
+	"github.com/egdaemon/fron/engine"
+)
 
 // ZeroOffsetSeed is the reserved seed selecting cron-equivalent mode.
-const ZeroOffsetSeed = "fron.zero.offset"
+const ZeroOffsetSeed = engine.ZeroOffsetSeed
 
 type dayclause uint8
 
