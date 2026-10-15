@@ -18,7 +18,7 @@ type spec interface {
 // applied after the options derived from the tree, as in Compile. Cron is a
 // clock grid and cannot express a seed offset so the aligned form is rendered.
 func CRON(t T, options ...engine.Option) (string, error) {
-	s, err := Compile(t, "", options...)
+	s, err := Compile(t, options...)
 	if err != nil {
 		return "", err
 	}

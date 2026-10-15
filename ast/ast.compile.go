@@ -7,10 +7,10 @@ import (
 )
 
 // Compile translates the tree into a schedule. Any extra options are applied
-// after the options derived from the tree. seed is the fallback used when the
-// schedule has no seed of its own: a stable offset for the same seed, a random
-// offset for an empty one.
-func Compile(t T, seed string, options ...engine.Option) (engine.Schedule, error) {
+// after the options derived from the tree. A schedule that ends up with no
+// offset of its own, because it carries no seed or an option cleared it, gets a
+// random one; give the options an AutoSeed to make it stable instead.
+func Compile(t T, options ...engine.Option) (engine.Schedule, error) {
 	opts := engine.Options()
 
 	switch t.day {
@@ -45,8 +45,9 @@ func Compile(t T, seed string, options ...engine.Option) (engine.Schedule, error
 		offset = engine.Seed(t.Seed)
 	}
 
-	// the fallback seed fills the offset when the schedule did not carry one,
-	// or an option cleared it. it is applied last so caller options win. a pin
-	// overrides the offset whatever it is.
-	return engine.New(t.Hz, offset, opts.AutoSeed(seed)...)
+	// a random offset fills the gap when the schedule did not carry a seed, or
+	// an option cleared it. it is applied last, so an AutoSeed given by the
+	// caller has already filled the offset and wins. a pin overrides the offset
+	// whatever it is.
+	return engine.New(t.Hz, offset, opts.AutoSeed("")...)
 }
