@@ -1,12 +1,16 @@
 package ast
 
 import (
+	"time"
+
 	"github.com/egdaemon/fron/engine"
 )
 
 // Compile translates the tree into a schedule. Any extra options are applied
-// after the options derived from the tree.
-func Compile(t T, options ...engine.Option) (engine.Schedule, error) {
+// after the options derived from the tree. seed is the fallback used when the
+// schedule has no seed of its own: a stable offset for the same seed, a random
+// offset for an empty one.
+func Compile(t T, seed string, options ...engine.Option) (engine.Schedule, error) {
 	opts := engine.Options()
 
 	switch t.day {
@@ -32,12 +36,17 @@ func Compile(t T, options ...engine.Option) (engine.Schedule, error) {
 	opts = opts.InTzName(t.Tz)
 	opts = append(opts, options...)
 
+	var offset time.Duration
 	switch {
 	case t.ZeroOffset:
-		return engine.New(t.Hz, engine.ZeroOffset, opts...)
+		// a full period is zero modulo hz, but unlike zero the fallback
+		// below leaves it alone, unless a caller option ignores the seed.
+		offset = t.Hz
 	case t.HasSeed:
-		return engine.New(t.Hz, engine.Seed(t.Seed), opts...)
-	default:
-		return engine.New(t.Hz, engine.Seed(t.Input), opts...)
+		offset = engine.Seed(t.Seed)
 	}
+
+	// the fallback seed fills the offset when the schedule did not carry one,
+	// or an option cleared it. it is applied last so caller options win.
+	return engine.New(t.Hz, offset, opts.AutoSeed(seed)...)
 }

@@ -61,13 +61,16 @@ func New(hz, offset time.Duration, options ...Option) (Schedule, error) {
 		return nil, fmt.Errorf("engine: offset must not be negative: %s", offset)
 	}
 
-	s := &scheduler{hz: hz, offset: offset % hz, loc: time.UTC, horizon: DefaultHorizon}
+	s := &scheduler{hz: hz, offset: offset, loc: time.UTC, horizon: DefaultHorizon}
 	for _, opt := range options {
 		if err := opt(s); err != nil {
 			return nil, err
 		}
 	}
 
+	// reduced after the options so a caller can pass a full period: zero
+	// modulo hz, but not the zero offset AutoSeed fills.
+	s.offset %= hz
 	return s, nil
 }
 

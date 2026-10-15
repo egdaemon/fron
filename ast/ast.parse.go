@@ -277,7 +277,6 @@ func (p *parser) finish(n int) (T, error) {
 		p.t.ZeroOffset = true
 	}
 
-	p.t.Input = strings.TrimSpace(p.input)
 	return p.t, nil
 }
 

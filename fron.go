@@ -56,8 +56,10 @@ func Parse(input string) (T, error) {
 }
 
 // Compile translates the tree into a schedule, extra options are applied last.
-func Compile(t T, options ...Option) (Schedule, error) {
-	return ast.Compile(t, options...)
+// seed is the fallback for schedules that carry no seed: stable per seed, and a
+// random offset when empty.
+func Compile(t T, seed string, options ...Option) (Schedule, error) {
+	return ast.Compile(t, seed, options...)
 }
 
 // CRON renders the tree as a 5 field cron expression.
@@ -65,16 +67,18 @@ func CRON(t T, options ...Option) (string, error) {
 	return ast.CRON(t, options...)
 }
 
-// NextTick parses s and returns the first tick strictly after t. Pass
+// NextTick parses s and returns the first tick strictly after t. seed is the
+// fallback for a schedule that carries no seed of its own: the same seed gives
+// the same slot every time, an empty one a random slot. Pass
 // fron.Options().Inclusive()... to also accept t itself. It returns ErrNoTick
 // when no tick exists within the horizon.
-func NextTick(t time.Time, s string, options ...Option) (time.Time, error) {
+func NextTick(t time.Time, s, seed string, options ...Option) (time.Time, error) {
 	tree, err := ast.Parse(s)
 	if err != nil {
 		return time.Time{}, err
 	}
 
-	sched, err := ast.Compile(tree, options...)
+	sched, err := ast.Compile(tree, seed, options...)
 	if err != nil {
 		return time.Time{}, err
 	}

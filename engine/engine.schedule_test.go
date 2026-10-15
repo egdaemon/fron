@@ -268,6 +268,14 @@ func TestAutoSeed(t *testing.T) {
 		require.Equal(t, offset(a), offset(again))
 	})
 
+	t.Run("should treat a full period as a zero offset that AutoSeed leaves alone", func(t *testing.T) {
+		s := testx.MustT(engine.New(time.Hour, time.Hour, engine.Options().AutoSeed("row-1")...))(t)
+		require.Equal(t, time.Duration(0), offset(s))
+
+		s = testx.MustT(engine.New(time.Hour, time.Hour, engine.Options().IgnoreSeed().AutoSeed("row-1")...))(t)
+		require.Equal(t, engine.Seed("row-1")%time.Hour, offset(s))
+	})
+
 	t.Run("should keep the offset within one period", func(t *testing.T) {
 		for _, id := range []string{"a", "b", "c", "row-1", "row-2"} {
 			s := testx.MustT(engine.New(15*time.Minute, 0, engine.Options().AutoSeed(id)...))(t)

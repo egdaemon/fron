@@ -354,14 +354,30 @@ func TestCRON(t *testing.T) {
 }
 
 func TestCRONSeeds(t *testing.T) {
+	t.Run("should pick a random offset for a schedule without a seed and an empty fallback", func(t *testing.T) {
+		a, err := ast.Parse("30m")
+		require.NoError(t, err)
+
+		seen := make(map[time.Duration]struct{})
+		for range 40 {
+			s := testx.MustT(ast.Compile(a, ""))(t).(interface{ Spec() fron.Spec }).Spec()
+			require.GreaterOrEqual(t, s.Offset, time.Duration(0))
+			require.Less(t, s.Offset, s.Hz)
+			seen[s.Offset] = struct{}{}
+		}
+		require.Greater(t, len(seen), 1)
+	})
+
 	t.Run("should derive a deterministic offset within the frequency", func(t *testing.T) {
-		for _, in := range []string{"billing-job | 2h", "auth-cleaner | 15m", "x | 1m", "30m"} {
+		// a typed seed, or a fallback seed for a schedule without one.
+		for _, c := range [][2]string{{"billing-job | 2h", ""}, {"auth-cleaner | 15m", ""}, {"x | 1m", ""}, {"30m", "row-1"}} {
+			in := c[0]
 			a, err := ast.Parse(in)
 			require.NoError(t, err, in)
 
-			first, err := ast.Compile(a)
+			first, err := ast.Compile(a, c[1])
 			require.NoError(t, err, in)
-			second, err := ast.Compile(a)
+			second, err := ast.Compile(a, c[1])
 			require.NoError(t, err, in)
 
 			s1, s2 := first.(interface{ Spec() fron.Spec }).Spec(), second.(interface{ Spec() fron.Spec }).Spec()
@@ -375,7 +391,7 @@ func TestCRONSeeds(t *testing.T) {
 		a, err := ast.Parse("fron.zero.offset | 15m")
 		require.NoError(t, err)
 
-		s, err := ast.Compile(a)
+		s, err := ast.Compile(a, "")
 		require.NoError(t, err)
 		require.Equal(t, time.Duration(0), s.(interface{ Spec() fron.Spec }).Spec().Offset)
 	})
@@ -385,7 +401,7 @@ func TestCRONSeeds(t *testing.T) {
 		for _, seed := range []string{"a", "b", "c", "d", "e", "f", "g", "h"} {
 			a, err := ast.Parse(seed + " | 1h")
 			require.NoError(t, err)
-			s, err := ast.Compile(a)
+			s, err := ast.Compile(a, "")
 			require.NoError(t, err)
 			offsets[s.(interface{ Spec() fron.Spec }).Spec().Offset] = struct{}{}
 		}

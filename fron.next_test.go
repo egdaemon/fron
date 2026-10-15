@@ -18,7 +18,7 @@ func TestNextTick(t *testing.T) {
 			time.Date(2026, 10, 15, 8, 14, 0, 0, time.UTC): time.Date(2026, 10, 15, 8, 15, 0, 0, time.UTC),
 			time.Date(2026, 10, 15, 8, 15, 0, 0, time.UTC): time.Date(2026, 10, 15, 8, 30, 0, 0, time.UTC),
 		} {
-			actual := testx.MustT(fron.NextTick(from, zero+"15m"))(t)
+			actual := testx.MustT(fron.NextTick(from, zero+"15m", ""))(t)
 			require.Equal(t, expected, actual, from)
 		}
 	})
@@ -26,56 +26,55 @@ func TestNextTick(t *testing.T) {
 	t.Run("should accept the reference time when inclusive", func(t *testing.T) {
 		opts := fron.Options().Inclusive()
 
-		actual := testx.MustT(fron.NextTick(time.Date(2026, 10, 15, 8, 15, 0, 0, time.UTC), zero+"15m", opts...))(t)
+		actual := testx.MustT(fron.NextTick(time.Date(2026, 10, 15, 8, 15, 0, 0, time.UTC), zero+"15m", "", opts...))(t)
 		require.Equal(t, time.Date(2026, 10, 15, 8, 15, 0, 0, time.UTC), actual)
 
-		actual = testx.MustT(fron.NextTick(time.Date(2026, 10, 15, 8, 16, 0, 0, time.UTC), zero+"15m", opts...))(t)
+		actual = testx.MustT(fron.NextTick(time.Date(2026, 10, 15, 8, 16, 0, 0, time.UTC), zero+"15m", "", opts...))(t)
 		require.Equal(t, time.Date(2026, 10, 15, 8, 30, 0, 0, time.UTC), actual)
 	})
 
 	t.Run("should honour conditions", func(t *testing.T) {
 		// 2026-10-16 is a friday.
-		actual := testx.MustT(fron.NextTick(time.Date(2026, 10, 16, 17, 0, 0, 0, time.UTC), zero+"1h @ on weekdays during 09:00-17:00"))(t)
+		actual := testx.MustT(fron.NextTick(time.Date(2026, 10, 16, 17, 0, 0, 0, time.UTC), zero+"1h @ on weekdays during 09:00-17:00", ""))(t)
 		require.Equal(t, time.Date(2026, 10, 19, 9, 0, 0, 0, time.UTC), actual)
 
-		actual = testx.MustT(fron.NextTick(time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC), zero+"1d @ on day 1,15"))(t)
+		actual = testx.MustT(fron.NextTick(time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC), zero+"1d @ on day 1,15", ""))(t)
 		require.Equal(t, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), actual)
 
-		actual = testx.MustT(fron.NextTick(time.Date(2026, 10, 15, 23, 0, 0, 0, time.UTC), zero+"1h @ during 22:00-02:00"))(t)
+		actual = testx.MustT(fron.NextTick(time.Date(2026, 10, 15, 23, 0, 0, 0, time.UTC), zero+"1h @ during 22:00-02:00", ""))(t)
 		require.Equal(t, time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC), actual)
 	})
 
 	t.Run("should handle daylight saving transitions", func(t *testing.T) {
 		// dst ended 2026-11-01 in new york, 09:00 local moves from 13:00 to 14:00 utc.
-		actual := testx.MustT(fron.NextTick(time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), zero+"1h @ during 09:00-10:00 in America/New_York"))(t)
+		actual := testx.MustT(fron.NextTick(time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), zero+"1h @ during 09:00-10:00 in America/New_York", ""))(t)
 		require.Equal(t, time.Date(2026, 11, 1, 14, 0, 0, 0, time.UTC), actual)
 	})
 
 	t.Run("should return the result in the reference location", func(t *testing.T) {
 		loc := time.FixedZone("plus2", 2*60*60)
 		from := time.Date(2026, 10, 15, 8, 0, 0, 0, loc)
-		actual := testx.MustT(fron.NextTick(from, zero+"15m"))(t)
+		actual := testx.MustT(fron.NextTick(from, zero+"15m", ""))(t)
 		require.Equal(t, loc, actual.Location())
 		require.True(t, from.Add(15*time.Minute).Equal(actual))
 	})
 
-	t.Run("should be deterministic for seeded and unseeded input", func(t *testing.T) {
+	t.Run("should be deterministic for a typed seed or a fallback seed", func(t *testing.T) {
 		from := time.Date(2026, 10, 15, 8, 0, 0, 0, time.UTC)
-		for _, in := range []string{"billing-job | 2h", "30m"} {
-			require.Equal(t, testx.MustT(fron.NextTick(from, in))(t), testx.MustT(fron.NextTick(from, in))(t), in)
-		}
+		require.Equal(t, testx.MustT(fron.NextTick(from, "billing-job | 2h", ""))(t), testx.MustT(fron.NextTick(from, "billing-job | 2h", ""))(t))
+		require.Equal(t, testx.MustT(fron.NextTick(from, "30m", "row-1"))(t), testx.MustT(fron.NextTick(from, "30m", "row-1"))(t))
 	})
 
 	t.Run("should fail for invalid input", func(t *testing.T) {
 		for _, in := range []string{"", "1h @ on 2nd wed", "*/15 * * * *", "1h @ in Mars/Olympus"} {
-			_, err := fron.NextTick(time.Now(), in)
+			_, err := fron.NextTick(time.Now(), in, "")
 			require.Error(t, err, in)
 		}
 	})
 
 	t.Run("should fail when no tick exists", func(t *testing.T) {
 		// 28 day multiples from the epoch always land on a thursday.
-		_, err := fron.NextTick(time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC), zero+"28d @ on mon")
+		_, err := fron.NextTick(time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC), zero+"28d @ on mon", "")
 		require.ErrorIs(t, err, fron.ErrNoTick)
 	})
 }
@@ -84,9 +83,9 @@ func TestNextTickSeeds(t *testing.T) {
 	from := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
 
 	t.Run("should give every id its own stable slot", func(t *testing.T) {
-		a := testx.MustT(fron.NextTick(from, "1h", fron.Options().IgnoreSeed().AutoSeed("row-a")...))(t)
-		b := testx.MustT(fron.NextTick(from, "1h", fron.Options().IgnoreSeed().AutoSeed("row-b")...))(t)
-		again := testx.MustT(fron.NextTick(from, "1h", fron.Options().IgnoreSeed().AutoSeed("row-a")...))(t)
+		a := testx.MustT(fron.NextTick(from, "1h", "", fron.Options().IgnoreSeed().AutoSeed("row-a")...))(t)
+		b := testx.MustT(fron.NextTick(from, "1h", "", fron.Options().IgnoreSeed().AutoSeed("row-b")...))(t)
+		again := testx.MustT(fron.NextTick(from, "1h", "", fron.Options().IgnoreSeed().AutoSeed("row-a")...))(t)
 
 		require.NotEqual(t, a, b)
 		require.Equal(t, a, again)
@@ -95,22 +94,22 @@ func TestNextTickSeeds(t *testing.T) {
 
 	t.Run("should ignore a seed typed in the string", func(t *testing.T) {
 		opts := fron.Options().IgnoreSeed().AutoSeed("row-a")
-		plain := testx.MustT(fron.NextTick(from, "1h", opts...))(t)
-		typed := testx.MustT(fron.NextTick(from, "someone-else | 1h", opts...))(t)
-		zero := testx.MustT(fron.NextTick(from, "fron.zero.offset | 1h", opts...))(t)
+		plain := testx.MustT(fron.NextTick(from, "1h", "", opts...))(t)
+		typed := testx.MustT(fron.NextTick(from, "someone-else | 1h", "", opts...))(t)
+		zero := testx.MustT(fron.NextTick(from, "fron.zero.offset | 1h", "", opts...))(t)
 
 		require.Equal(t, plain, typed)
 		require.Equal(t, plain, zero)
 	})
 
 	t.Run("should honour a typed seed without the options", func(t *testing.T) {
-		zero := testx.MustT(fron.NextTick(from, "fron.zero.offset | 1h"))(t)
+		zero := testx.MustT(fron.NextTick(from, "fron.zero.offset | 1h", ""))(t)
 		require.Equal(t, time.Date(2026, 10, 15, 1, 0, 0, 0, time.UTC), zero)
 	})
 
 	t.Run("should keep conditions when seeding", func(t *testing.T) {
 		// 2026-10-17 is a saturday.
-		got := testx.MustT(fron.NextTick(time.Date(2026, 10, 17, 0, 0, 0, 0, time.UTC), "1h @ on weekdays", fron.Options().IgnoreSeed().AutoSeed("row-a")...))(t)
+		got := testx.MustT(fron.NextTick(time.Date(2026, 10, 17, 0, 0, 0, 0, time.UTC), "1h @ on weekdays", "", fron.Options().IgnoreSeed().AutoSeed("row-a")...))(t)
 		require.Equal(t, time.Monday, got.Weekday())
 	})
 }
@@ -122,23 +121,72 @@ func TestNextTickWindowSnap(t *testing.T) {
 		seen := make(map[time.Time]struct{})
 		for _, id := range []string{"a", "b", "c", "d", "e", "f"} {
 			opts := fron.Options().IgnoreSeed().AutoSeed(id)
-			got := testx.MustT(fron.NextTick(from, "1d @ during 09:00-17:00", opts...))(t)
+			got := testx.MustT(fron.NextTick(from, "1d @ during 09:00-17:00", "", opts...))(t)
 			require.False(t, got.Before(time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC)), id)
 			require.Less(t, got, time.Date(2026, 10, 15, 17, 0, 0, 0, time.UTC), id)
-			require.Equal(t, got, testx.MustT(fron.NextTick(from, "1d @ during 09:00-17:00", opts...))(t), id)
+			require.Equal(t, got, testx.MustT(fron.NextTick(from, "1d @ during 09:00-17:00", "", opts...))(t), id)
 			seen[got] = struct{}{}
 		}
 		require.Greater(t, len(seen), 1)
 	})
 
 	t.Run("should keep a daily tick that already falls inside the window", func(t *testing.T) {
-		got := testx.MustT(fron.NextTick(from, "fron.zero.offset | 1d @ during 00:00-10:00"))(t)
+		got := testx.MustT(fron.NextTick(from, "fron.zero.offset | 1d @ during 00:00-10:00", ""))(t)
 		require.Equal(t, time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC), got)
 	})
 
 	t.Run("should render the same time the cron form fires", func(t *testing.T) {
 		tree := testx.MustT(fron.Parse("fron.zero.offset | 1d @ during 09:00-17:00"))(t)
 		require.Equal(t, "0 9 * * *", testx.MustT(fron.CRON(tree))(t))
-		require.Equal(t, time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC), testx.MustT(fron.NextTick(from, "fron.zero.offset | 1d @ during 09:00-17:00"))(t))
+		require.Equal(t, time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC), testx.MustT(fron.NextTick(from, "fron.zero.offset | 1d @ during 09:00-17:00", ""))(t))
+	})
+}
+
+func TestNextTickFallbackSeed(t *testing.T) {
+	from := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
+
+	t.Run("should give each fallback seed its own stable slot", func(t *testing.T) {
+		a := testx.MustT(fron.NextTick(from, "1h", "row-a"))(t)
+		b := testx.MustT(fron.NextTick(from, "1h", "row-b"))(t)
+		require.NotEqual(t, a, b)
+		require.Equal(t, a, testx.MustT(fron.NextTick(from, "1h", "row-a"))(t))
+	})
+
+	t.Run("should not depend on the text of the schedule", func(t *testing.T) {
+		// two different strings with the same fallback land on the same offset.
+		a := testx.MustT(fron.NextTick(from, "1h", "row-a"))(t)
+		b := testx.MustT(fron.NextTick(from, "1h @ on everyday", "row-a"))(t)
+		require.Equal(t, a, b)
+	})
+
+	t.Run("should pick a random slot for an empty fallback seed", func(t *testing.T) {
+		seen := make(map[time.Time]struct{})
+		for range 40 {
+			got := testx.MustT(fron.NextTick(from, "1h", ""))(t)
+			require.True(t, got.After(from))
+			require.False(t, got.After(from.Add(time.Hour)))
+			seen[got] = struct{}{}
+		}
+		require.Greater(t, len(seen), 1)
+	})
+
+	t.Run("should let a typed seed beat the fallback", func(t *testing.T) {
+		typed := testx.MustT(fron.NextTick(from, "someone | 1h", "row-a"))(t)
+		require.Equal(t, typed, testx.MustT(fron.NextTick(from, "someone | 1h", "row-b"))(t))
+
+		zero := testx.MustT(fron.NextTick(from, "fron.zero.offset | 1h", "row-a"))(t)
+		require.Equal(t, time.Date(2026, 10, 15, 1, 0, 0, 0, time.UTC), zero)
+	})
+
+	t.Run("should let IgnoreSeed hand the schedule to the fallback", func(t *testing.T) {
+		ignore := fron.Options().IgnoreSeed()
+		plain := testx.MustT(fron.NextTick(from, "1h", "row-a"))(t)
+		require.Equal(t, plain, testx.MustT(fron.NextTick(from, "someone | 1h", "row-a", ignore...))(t))
+		require.Equal(t, plain, testx.MustT(fron.NextTick(from, "fron.zero.offset | 1h", "row-a", ignore...))(t))
+	})
+
+	t.Run("should treat the reserved seed as a zero offset fallback", func(t *testing.T) {
+		got := testx.MustT(fron.NextTick(from, "1h", fron.ZeroOffsetSeed))(t)
+		require.Equal(t, time.Date(2026, 10, 15, 1, 0, 0, 0, time.UTC), got)
 	})
 }

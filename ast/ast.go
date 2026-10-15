@@ -25,9 +25,6 @@ const (
 
 // T is a node in the parsed schedule tree.
 type T struct {
-	// Input is the trimmed source text, used to auto seed when no seed is given.
-	Input string
-
 	Seed       string
 	HasSeed    bool
 	ZeroOffset bool

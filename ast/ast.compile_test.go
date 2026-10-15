@@ -15,7 +15,7 @@ func TestCompile(t *testing.T) {
 		a, err := ast.Parse("fron.zero.offset | 15m @ on weekdays during 09:00-17:00 in UTC")
 		require.NoError(t, err)
 
-		compiled, err := ast.Compile(a)
+		compiled, err := ast.Compile(a, "")
 		require.NoError(t, err)
 
 		manual, err := engine.New(
@@ -41,7 +41,7 @@ func TestCompile(t *testing.T) {
 		a, err := ast.Parse("billing-job | 2h")
 		require.NoError(t, err)
 
-		compiled, err := ast.Compile(a)
+		compiled, err := ast.Compile(a, "")
 		require.NoError(t, err)
 
 		manual, err := engine.New(2*time.Hour, engine.Seed("billing-job"))
@@ -55,7 +55,7 @@ func TestCompile(t *testing.T) {
 		a, err := ast.Parse("fron.zero.offset | 1h @ on weekdays")
 		require.NoError(t, err)
 
-		compiled, err := ast.Compile(a, engine.Options().Weekends()...)
+		compiled, err := ast.Compile(a, "", engine.Options().Weekends()...)
 		require.NoError(t, err)
 
 		// 2026-10-16 is a friday.
