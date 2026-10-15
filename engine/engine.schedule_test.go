@@ -316,3 +316,63 @@ func TestIgnoreSeed(t *testing.T) {
 		require.Equal(t, time.Duration(0), offset(s))
 	})
 }
+
+func TestWindowSnap(t *testing.T) {
+	day := func(d, h, m int) time.Time { return time.Date(2026, 10, d, h, m, 0, 0, time.UTC) }
+
+	t.Run("should place a zero offset daily schedule at the start of the window", func(t *testing.T) {
+		s := testx.MustT(engine.New(24*time.Hour, 0, engine.Options().During(9*time.Hour, 17*time.Hour)...))(t)
+		require.Equal(t, day(15, 9, 0), testx.MustT(s.Next(day(15, 0, 0)))(t))
+		require.Equal(t, day(16, 9, 0), testx.MustT(s.Next(day(15, 9, 0)))(t))
+		require.Equal(t, day(17, 9, 0), testx.MustT(s.Next(day(16, 9, 0)))(t))
+	})
+
+	t.Run("should smear the offset within the window when it falls outside", func(t *testing.T) {
+		s := testx.MustT(engine.New(24*time.Hour, 3*time.Hour+25*time.Minute, engine.Options().During(9*time.Hour, 17*time.Hour)...))(t)
+		require.Equal(t, day(15, 12, 25), testx.MustT(s.Next(day(15, 0, 0)))(t))
+		require.Equal(t, day(16, 12, 25), testx.MustT(s.Next(day(15, 12, 25)))(t))
+	})
+
+	t.Run("should wrap a large offset into the window", func(t *testing.T) {
+		s := testx.MustT(engine.New(24*time.Hour, 20*time.Hour+10*time.Minute, engine.Options().During(9*time.Hour, 10*time.Hour)...))(t)
+		require.Equal(t, day(15, 9, 10), testx.MustT(s.Next(day(15, 0, 0)))(t))
+	})
+
+	t.Run("should keep the offset when it falls inside the window", func(t *testing.T) {
+		s := testx.MustT(engine.New(24*time.Hour, 9*time.Hour+30*time.Minute, engine.Options().During(9*time.Hour, 10*time.Hour)...))(t)
+		require.Equal(t, day(15, 9, 30), testx.MustT(s.Next(day(15, 0, 0)))(t))
+		require.Equal(t, day(16, 9, 30), testx.MustT(s.Next(day(15, 9, 30)))(t))
+	})
+
+	t.Run("should place a tick in the window when the frequency steps over it", func(t *testing.T) {
+		s := testx.MustT(engine.New(6*time.Hour, 0, engine.Options().During(9*time.Hour, 10*time.Hour)...))(t)
+		require.Equal(t, day(15, 9, 0), testx.MustT(s.Next(day(15, 0, 0)))(t))
+		require.Equal(t, day(16, 9, 0), testx.MustT(s.Next(day(15, 9, 0)))(t))
+	})
+
+	t.Run("should not add a tick when the grid already lands in the window", func(t *testing.T) {
+		s := testx.MustT(engine.New(time.Hour, 20*time.Minute, engine.Options().During(9*time.Hour, 10*time.Hour)...))(t)
+		require.Equal(t, day(15, 9, 20), testx.MustT(s.Next(day(15, 0, 0)))(t))
+		require.Equal(t, day(16, 9, 20), testx.MustT(s.Next(day(15, 9, 20)))(t))
+	})
+
+	t.Run("should snap windows that wrap midnight", func(t *testing.T) {
+		s := testx.MustT(engine.New(24*time.Hour, 13*time.Hour+30*time.Minute, engine.Options().During(22*time.Hour, 2*time.Hour)...))(t)
+		require.Equal(t, day(15, 23, 30), testx.MustT(s.Next(day(15, 0, 0)))(t))
+		require.Equal(t, day(16, 23, 30), testx.MustT(s.Next(day(15, 23, 30)))(t))
+	})
+
+	t.Run("should snap on the grid days of a multi day frequency", func(t *testing.T) {
+		s := testx.MustT(engine.New(72*time.Hour, 0, engine.Options().During(6*time.Hour, 12*time.Hour)...))(t)
+		first := testx.MustT(s.Next(day(15, 0, 0)))(t)
+		second := testx.MustT(s.Next(first))(t)
+		require.Equal(t, 6, first.Hour())
+		require.Equal(t, 72*time.Hour, second.Sub(first))
+	})
+
+	t.Run("should still apply day conditions", func(t *testing.T) {
+		// 2026-10-17 is a saturday, so the first weekday window start is monday.
+		s := testx.MustT(engine.New(24*time.Hour, 0, engine.Options().Weekdays().During(9*time.Hour, 17*time.Hour)...))(t)
+		require.Equal(t, day(19, 9, 0), testx.MustT(s.Next(day(16, 17, 0)))(t))
+	})
+}

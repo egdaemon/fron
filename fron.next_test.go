@@ -114,3 +114,31 @@ func TestNextTickSeeds(t *testing.T) {
 		require.Equal(t, time.Monday, got.Weekday())
 	})
 }
+
+func TestNextTickWindowSnap(t *testing.T) {
+	from := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
+
+	t.Run("should smear a daily schedule within the window by seed", func(t *testing.T) {
+		seen := make(map[time.Time]struct{})
+		for _, id := range []string{"a", "b", "c", "d", "e", "f"} {
+			opts := fron.Options().IgnoreSeed().AutoSeed(id)
+			got := testx.MustT(fron.NextTick(from, "1d @ during 09:00-17:00", opts...))(t)
+			require.False(t, got.Before(time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC)), id)
+			require.Less(t, got, time.Date(2026, 10, 15, 17, 0, 0, 0, time.UTC), id)
+			require.Equal(t, got, testx.MustT(fron.NextTick(from, "1d @ during 09:00-17:00", opts...))(t), id)
+			seen[got] = struct{}{}
+		}
+		require.Greater(t, len(seen), 1)
+	})
+
+	t.Run("should keep a daily tick that already falls inside the window", func(t *testing.T) {
+		got := testx.MustT(fron.NextTick(from, "fron.zero.offset | 1d @ during 00:00-10:00"))(t)
+		require.Equal(t, time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC), got)
+	})
+
+	t.Run("should render the same time the cron form fires", func(t *testing.T) {
+		tree := testx.MustT(fron.Parse("fron.zero.offset | 1d @ during 09:00-17:00"))(t)
+		require.Equal(t, "0 9 * * *", testx.MustT(fron.CRON(tree))(t))
+		require.Equal(t, time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC), testx.MustT(fron.NextTick(from, "fron.zero.offset | 1d @ during 09:00-17:00"))(t))
+	})
+}

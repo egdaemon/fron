@@ -12,10 +12,19 @@ const DefaultHorizon = 128 * 365 * 24 * time.Hour
 // conditions, or ErrNoTick if none exists within the horizon (DefaultHorizon
 // unless set with Horizon).
 func (t *scheduler) Next(last time.Time) (time.Time, error) {
-	loc := t.loc
+	var (
+		loc   = t.loc
+		from  = last.Add(t.lastdelta)
+		limit = last.Add(t.horizon)
+		next  = t.align(from)
+	)
 
-	limit := last.Add(t.horizon)
-	next := t.align(last.Add(t.lastdelta))
+	// a grid point at or before from can snap to a window start after it, so
+	// start one grid point back when there is a window.
+	if t.window {
+		next = next.Add(-t.hz)
+	}
+
 	for !next.After(limit) {
 		local := next.In(loc)
 		tomorrow := time.Date(local.Year(), local.Month(), local.Day()+1, 0, 0, 0, 0, loc)
@@ -24,11 +33,14 @@ func (t *scheduler) Next(last time.Time) (time.Time, error) {
 		case !t.day(local):
 			next = t.skip(next, tomorrow)
 		case t.window && !t.within(wall(local)):
+			// outside the window: move to the start of the next occurrence.
 			if wall(local) < t.start {
-				next = t.skip(next, at(local, t.start))
+				next = t.snap(at(local, t.start))
 			} else {
-				next = t.skip(next, tomorrow)
+				next = t.snap(at(tomorrow, t.start))
 			}
+		case !next.After(from):
+			next = t.align(next)
 		default:
 			return next.In(last.Location()), nil
 		}
@@ -108,4 +120,25 @@ func wall(t time.Time) time.Duration {
 // at is the wall clock time of day d on the same date as t.
 func at(t time.Time, d time.Duration) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, int(d/time.Second), int(d%time.Second), t.Location())
+}
+
+// snap returns the first tick of the window occurrence starting at ws: the
+// first grid point inside it, or when the frequency steps over the whole
+// window (e.g. a daily schedule with a morning window) the offset smeared
+// within the window, so ticks still spread out instead of piling up on ws.
+func (t *scheduler) snap(ws time.Time) time.Time {
+	if g := t.align(ws.Add(-time.Nanosecond)); g.Sub(ws) < t.span() {
+		return g
+	}
+
+	return ws.Add(t.offset % t.span())
+}
+
+// span is the length of the window.
+func (t *scheduler) span() time.Duration {
+	if t.start < t.end {
+		return t.end - t.start
+	}
+
+	return 24*time.Hour - t.start + t.end
 }
