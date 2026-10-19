@@ -57,6 +57,41 @@ func TestNextTick(t *testing.T) {
 				ts2,
 			)
 		})
+
+		t.Run("14d @ on sat", func(t *testing.T) {
+			// the options the terraform provider uses for scheduled workloads.
+			opts := fron.Options().IgnoreSeed().IgnorePin().InTz(time.UTC)
+			s := fron.Seeded("row-a")
+			ts0 := time.Date(2026, time.October, 19, 0, 0, 0, 0, time.UTC)
+			ts1, err := s.NextTick(ts0, "14d @ on sat", opts...)
+			require.NoError(t, err)
+			require.Equal(t,
+				time.Date(2026, time.October, 31, 10, 24, 53, 721551607, time.UTC),
+				ts1,
+			)
+			require.Equal(t, time.Saturday, ts1.Weekday())
+			ts2, err := s.NextTick(ts1, "14d @ on sat", opts...)
+			require.NoError(t, err)
+			require.Equal(t,
+				time.Date(2026, time.November, 14, 10, 24, 53, 721551607, time.UTC),
+				ts2,
+			)
+			require.Equal(t, time.Saturday, ts2.Weekday())
+			ts3, err := s.NextTick(ts2, "14d @ on sat", opts...)
+			require.NoError(t, err)
+			require.Equal(t,
+				time.Date(2026, time.November, 28, 10, 24, 53, 721551607, time.UTC),
+				ts3,
+			)
+			require.Equal(t, time.Saturday, ts3.Weekday())
+			ts4, err := s.NextTick(ts3, "14d @ on sat", opts...)
+			require.NoError(t, err)
+			require.Equal(t,
+				time.Date(2026, time.December, 12, 10, 24, 53, 721551607, time.UTC),
+				ts4,
+			)
+			require.Equal(t, time.Saturday, ts4.Weekday())
+		})
 	})
 
 	t.Run("should accept the reference time when inclusive", func(t *testing.T) {
