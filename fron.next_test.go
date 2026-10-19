@@ -1,6 +1,7 @@
 package fron_test
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -143,9 +144,67 @@ func TestNextTick(t *testing.T) {
 		}
 	})
 
+	t.Run("should snap a whole day frequency to a permitted day", func(t *testing.T) {
+		// 28 day multiples from the epoch always land on a thursday, so the tick snaps to the following monday.
+		actual := testx.MustT(fron.NextTick(time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC), pin00("28d @ on mon")))(t)
+		require.Equal(t, time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC), actual)
+		require.Equal(t, time.Monday, actual.Weekday())
+	})
+
+	t.Run("should tick for every id", func(t *testing.T) {
+		// the options the terraform provider uses for scheduled workloads.
+		opts := fron.Options().IgnoreSeed().IgnorePin().InTz(time.UTC)
+		from := time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)
+
+		for expr, check := range map[string]func(t *testing.T, ts1, ts2 time.Time){
+			"1d @ on sat": func(t *testing.T, ts1, ts2 time.Time) {
+				require.Equal(t, time.Saturday, ts1.Weekday())
+				require.Equal(t, 7*24*time.Hour, ts2.Sub(ts1))
+			},
+			"7d @ on sat": func(t *testing.T, ts1, ts2 time.Time) {
+				require.Equal(t, time.Saturday, ts1.Weekday())
+				require.Equal(t, 7*24*time.Hour, ts2.Sub(ts1))
+			},
+			"14d @ on sat": func(t *testing.T, ts1, ts2 time.Time) {
+				require.Equal(t, time.Saturday, ts1.Weekday())
+				require.Equal(t, 14*24*time.Hour, ts2.Sub(ts1))
+			},
+			"21d @ on sat": func(t *testing.T, ts1, ts2 time.Time) {
+				require.Equal(t, time.Saturday, ts1.Weekday())
+				require.Equal(t, 21*24*time.Hour, ts2.Sub(ts1))
+			},
+			"14d @ on mon": func(t *testing.T, ts1, ts2 time.Time) {
+				require.Equal(t, time.Monday, ts1.Weekday())
+				require.Equal(t, 14*24*time.Hour, ts2.Sub(ts1))
+			},
+			"14d @ on day 1": func(t *testing.T, ts1, ts2 time.Time) {
+				require.Equal(t, 1, ts1.Day())
+				require.Equal(t, 1, ts2.Day())
+			},
+			"14d @ on sat during 09:00-17:00": func(t *testing.T, ts1, ts2 time.Time) {
+				require.Equal(t, time.Saturday, ts1.Weekday())
+				require.GreaterOrEqual(t, ts1.Hour(), 9)
+				require.Less(t, ts1.Hour(), 17)
+			},
+			"14d": func(t *testing.T, ts1, ts2 time.Time) {
+				require.Equal(t, 14*24*time.Hour, ts2.Sub(ts1))
+			},
+		} {
+			t.Run(expr, func(t *testing.T) {
+				for i := range 400 {
+					s := fron.Seeded(fmt.Sprintf("id-%d", i))
+					ts1 := testx.MustT(s.NextTick(from, expr, opts...))(t)
+					require.True(t, ts1.After(from), i)
+					ts2 := testx.MustT(s.NextTick(ts1, expr, opts...))(t)
+					require.True(t, ts2.After(ts1), i)
+					check(t, ts1, ts2)
+				}
+			})
+		}
+	})
+
 	t.Run("should fail when no tick exists", func(t *testing.T) {
-		// 28 day multiples from the epoch always land on a thursday.
-		_, err := fron.NextTick(time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC), pin00("28d @ on mon"))
+		_, err := fron.NextTick(time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC), "1h @ on weekdays", fron.Options().Horizon(time.Minute)...)
 		require.ErrorIs(t, err, fron.ErrNoTick)
 	})
 

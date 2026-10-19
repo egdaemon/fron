@@ -19,6 +19,10 @@ func (t *scheduler) Next(last time.Time) (time.Time, error) {
 		next  = t.align(from)
 	)
 
+	if t.snapdays() {
+		return t.nextSnapped(last, from, limit)
+	}
+
 	// a grid point at or before from can snap to a window start after it, so
 	// start one grid point back when there is a window.
 	if t.window {
@@ -47,6 +51,57 @@ func (t *scheduler) Next(last time.Time) (time.Time, error) {
 	}
 
 	return time.Time{}, ErrNoTick
+}
+
+// snapdays is true when the frequency is a whole number of days greater than
+// one and days are restricted. such a grid keeps landing on the same weekday
+// (e.g. every 14 days), so skipping disallowed days could never find a tick.
+// instead each grid point snaps forward to the next permitted day.
+func (t *scheduler) snapdays() bool {
+	const day = 24 * time.Hour
+
+	return (t.weekdays != 0 || t.monthdays != 0) && t.hz > day && t.hz%day == 0
+}
+
+// nextSnapped is Next for snapdays schedules: every grid point is moved forward
+// to the next permitted day at the same time of day, and into the window when
+// there is one. the result is the first of those after from.
+func (t *scheduler) nextSnapped(last, from, limit time.Time) (time.Time, error) {
+	// the grid point at or before from can snap to a day after it.
+	for c := t.align(from.Add(-t.hz)); !c.After(limit); c = t.align(c) {
+		if n, ok := t.snapped(c); ok && n.After(from) {
+			return n.In(last.Location()), nil
+		}
+	}
+
+	return time.Time{}, ErrNoTick
+}
+
+// snapped moves the grid point c to the first permitted day, and window, at or
+// after it.
+func (t *scheduler) snapped(c time.Time) (time.Time, bool) {
+	const attempts = 4096
+
+	n := c.In(t.loc)
+	for i := 0; i < attempts; i++ {
+		tomorrow := time.Date(n.Year(), n.Month(), n.Day()+1, 0, 0, 0, 0, t.loc)
+
+		switch {
+		case !t.day(n):
+			n = at(tomorrow, wall(n))
+		case t.window && !t.within(wall(n)):
+			if wall(n) < t.start {
+				n = t.snap(at(n, t.start))
+			} else {
+				n = t.snap(at(tomorrow, t.start))
+			}
+			n = n.In(t.loc)
+		default:
+			return n, true
+		}
+	}
+
+	return time.Time{}, false
 }
 
 // skip returns the first grid point at or after target. it always advances past

@@ -209,14 +209,20 @@ func TestHorizon(t *testing.T) {
 	})
 
 	t.Run("should give up beyond the horizon", func(t *testing.T) {
+		s := testx.MustT(engine.New(time.Hour, 0, engine.Options().Weekdays().Horizon(time.Minute)...))(t)
+		_, err := s.Next(time.Date(2026, 10, 17, 0, 0, 0, 0, time.UTC))
+		require.ErrorIs(t, err, engine.ErrNoTick)
+	})
+
+	t.Run("should snap a whole day grid to a permitted day", func(t *testing.T) {
 		// 28 day multiples from the epoch always land on a thursday.
 		s := testx.MustT(engine.New(28*24*time.Hour, 0, engine.Options().Days(time.Monday)...))(t)
-		_, err := s.Next(from)
-		require.ErrorIs(t, err, engine.ErrNoTick)
-
-		s = testx.MustT(engine.New(time.Hour, 0, engine.Options().Weekdays().Horizon(time.Minute)...))(t)
-		_, err = s.Next(time.Date(2026, 10, 17, 0, 0, 0, 0, time.UTC))
-		require.ErrorIs(t, err, engine.ErrNoTick)
+		next, err := s.Next(from)
+		require.NoError(t, err)
+		require.Equal(t, time.Monday, next.Weekday())
+		again, err := s.Next(next)
+		require.NoError(t, err)
+		require.Equal(t, 28*24*time.Hour, again.Sub(next))
 	})
 
 	t.Run("should reject a non positive horizon", func(t *testing.T) {
